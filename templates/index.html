@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Bot Interface</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #fdfdfd;
+      text-align: center;
+      padding-top: 50px;
+    }
+
+    .step-label {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .step-label span {
+      color: #77bfff;
+    }
+
+    .step-label b {
+      color: #1a3b6d;
+    }
+
+    .button {
+      display: inline-block;
+      background-color: #1597ea;
+      color: white;
+      font-size: 20px;
+      padding: 15px 30px;
+      margin: 10px 0 10px 0;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      width: 300px;
+    }
+
+    .button-outline {
+      background-color: white;
+      border: 3px solid #1597ea;
+      color: #1597ea;
+    }
+
+    .start-button {
+      background-color: #e81111;
+      color: white;
+    }
+
+    #audio-player {
+      margin-top: 10px;
+      display: none;
+    }
+
+    #file-name {
+      font-size: 14px;
+      color: #333;
+      margin-top: 10px;
+    }
+
+    /* Container for conversation widget (Step 5) */
+    #convaiWidgetContainer {
+      margin-top: 30px;
+      min-height: 300px;
+      border: 1px solid #ccc;
+      padding: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- STAP 1: Record Voice Sample -->
+  <div class="step">
+    <div class="step-label"><span>STAP 1</span> <b>STEM OPNEMEN & AUTOMATISCH VERWERKEN</b></div>
+    <button class="button" id="recordBtn" onclick="startRecording()">Start opname</button>
+    <button class="button" id="stopBtn" onclick="stopRecording()" style="display:none;">Stop opname</button>
+    <div id="voiceStatus" style="margin-top:5px;">Nog niet opgenomen</div>
+    <div id="transcriptionResult" style="margin-top:5px;"></div>
+    <div id="cleanTextResult" style="margin-top:5px;"></div>
+    <div id="audioResult" style="margin-top:5px;"></div>
+    <audio id="gptAudioPlayer" controls style="display:none; margin-top:10px;"></audio>
+  </div>
+
+  <script>
+    // ------------------------------------------------------
+    // GLOBAL VARIABLES
+    // ------------------------------------------------------
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let voiceBlob = null;
+
+    // ------------------------------------------------------
+    // SINGLE BUTTON WORKFLOW
+    // ------------------------------------------------------
+    function startRecording() {
+      document.getElementById('recordBtn').style.display = 'none';
+      document.getElementById('stopBtn').style.display = 'inline-block';
+      document.getElementById('voiceStatus').innerText = 'Opnemen...';
+      document.getElementById('transcriptionResult').innerText = '';
+      document.getElementById('cleanTextResult').innerText = '';
+      document.getElementById('audioResult').innerText = '';
+      document.getElementById('gptAudioPlayer').style.display = 'none';
+
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+          mediaRecorder.ondataavailable = event => {
+            audioChunks.push(event.data);
+          };
+          mediaRecorder.onstop = () => {
+            voiceBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            document.getElementById('voiceStatus').innerText = 'Stem opgenomen';
+            processVoiceSample();
+          };
+          mediaRecorder.start();
+        })
+        .catch(err => {
+          document.getElementById('voiceStatus').innerText = 'Microfoonfout: ' + err;
+          document.getElementById('recordBtn').style.display = 'inline-block';
+          document.getElementById('stopBtn').style.display = 'none';
+        });
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        document.getElementById('stopBtn').style.display = 'none';
+        document.getElementById('recordBtn').style.display = 'inline-block';
+      }
+    }
+
+    async function processVoiceSample() {
+      try {
+        // Step 2: Transcribe
+        document.getElementById('transcriptionResult').innerText = 'Transcriberen...';
+        const formData = new FormData();
+        formData.append('audio_file', voiceBlob, 'voice_sample.wav');
+        const transcribeRes = await fetch('/api/transcribe-audio', {
+          method: 'POST',
+          body: formData
+        });
+        const transcribeData = await transcribeRes.json();
+        if (!transcribeData.transcription) throw transcribeData.error || 'Transcribe fout';
+        document.getElementById('transcriptionResult').innerText = 'Transcriptie: ' + transcribeData.transcription;
+
+        // Step 3: GPT Clean Text
+        document.getElementById('cleanTextResult').innerText = 'GPT verwerkt...';
+        const cleanRes = await fetch('/api/clean-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: transcribeData.transcription })
+        });
+        const cleanData = await cleanRes.json();
+        if (!cleanData.cleaned_text) throw cleanData.error || 'GPT fout';
+        document.getElementById('cleanTextResult').innerText = 'Schoongemaakte tekst: ' + cleanData.cleaned_text;
+
+        // Step 4: ElevenLabs TTS
+        document.getElementById('audioResult').innerText = 'Audio wordt aangemaakt...';
+        const ttsRes = await fetch('/api/text-to-speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleanData.cleaned_text })
+        });
+        const ttsData = await ttsRes.json();
+        if (!ttsData.audio_url) throw ttsData.error || 'Audio fout';
+        document.getElementById('audioResult').innerText = 'Audio aangemaakt!';
+        const audioPlayer = document.getElementById('gptAudioPlayer');
+        audioPlayer.src = ttsData.audio_url;
+        audioPlayer.style.display = 'block';
+        audioPlayer.load();
+
+      } catch (err) {
+        document.getElementById('audioResult').innerText = 'Fout: ' + err;
+      }
+    }
+  </script>
+</body>
+</html>
