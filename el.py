@@ -33,7 +33,7 @@ def text_to_speech_file(text: str) -> str:
     # play(response)
 
     # Generating a unique file name for the output MP3 file
-    save_file_path = f"{uuid.uuid4()}.mp3"
+    save_file_path = f"audio/{uuid.uuid4()}.mp3"
 
     # Writing the audio to a file
     with open(save_file_path, "wb") as f:

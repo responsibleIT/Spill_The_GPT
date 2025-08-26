@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Gossip Loop</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #fdfdfd; text-align: center; padding-top: 50px; }
+    h2 { color: #1597ea; }
+    #audioPlayer { margin-top: 30px; }
+    .stats { margin: 20px auto; padding: 15px; background: #eaf6ff; border-radius: 10px; width: 350px; }
+    .stat { font-size: 18px; margin: 8px 0; }
+    #progressBar { width: 300px; height: 8px; background: #eee; border-radius: 4px; margin: 10px auto; }
+    #progress { height: 8px; background: #1597ea; border-radius: 4px; width: 0%; }
+  </style>
+</head>
+<body>
+  <h2>Alle Gossip Audio's</h2>
+  <div class="stats">
+    <div class="stat">Aantal opnames: <span id="numRecordings">...</span></div>
+    <div class="stat">Totale tijd: <span id="totalTime">...</span></div>
+    <div class="stat">Laatste gossip: <span id="lastGossip">...</span></div>
+  </div>
+  <audio id="audioPlayer" controls autoplay></audio>
+  <div id="progressBar"><div id="progress"></div></div>
+  <div id="nowPlaying" style="margin-top:10px;"></div>
+  <script>
+    const audioFiles = {{ audio_urls|tojson }};
+    let current = 0;
+    const player = document.getElementById('audioPlayer');
+    const nowPlaying = document.getElementById('nowPlaying');
+    const numRecordings = document.getElementById('numRecordings');
+    const totalTime = document.getElementById('totalTime');
+    const lastGossip = document.getElementById('lastGossip');
+    const progress = document.getElementById('progress');
+
+    numRecordings.innerText = audioFiles.length;
+    lastGossip.innerText = audioFiles.length ? audioFiles[audioFiles.length-1].split('/').pop() : "Geen";
+
+    // Calculate total duration
+    let durations = [];
+    function getDurations(idx) {
+      if (idx >= audioFiles.length) {
+        // All durations loaded
+        let total = durations.reduce((a,b) => a+b, 0);
+        let min = Math.floor(total/60);
+        let sec = Math.round(total%60);
+        totalTime.innerText = min + " min " + sec + " sec";
+        return;
+      }
+      let tempAudio = document.createElement('audio');
+      tempAudio.src = audioFiles[idx];
+      tempAudio.addEventListener('loadedmetadata', function() {
+        durations.push(tempAudio.duration);
+        getDurations(idx+1);
+      });
+    }
+    getDurations(0);
+
+    function playNext() {
+      if (audioFiles.length === 0) return;
+      player.src = audioFiles[current];
+      nowPlaying.innerText = "Nu speelt: " + audioFiles[current].split('/').pop();
+      player.load();
+      player.play();
+    }
+
+    player.onended = function() {
+      current = (current + 1) % audioFiles.length;
+      playNext();
+    };
+
+    // Progress bar
+    player.ontimeupdate = function() {
+      if (player.duration) {
+        progress.style.width = ((player.currentTime/player.duration)*100) + "%";
+      }
+    };
+
+    // Start playback
+    playNext();
+  </script>
+</body>
+</html>

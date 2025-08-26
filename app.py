@@ -75,11 +75,18 @@ def text_to_speech():
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):
-    audio_dir = os.path.abspath(os.getcwd())
+    audio_dir = os.path.join(os.path.abspath(os.getcwd()), "audio")
     file_path = os.path.join(audio_dir, filename)
     if not os.path.exists(file_path):
         return jsonify({"error": "Audio file not found"}), 404
     return send_file(file_path, mimetype="audio/mpeg")
+
+@app.route('/gossip-loop')
+def gossip_loop():
+    audio_dir = os.path.join(os.path.abspath(os.getcwd()), "audio")
+    audio_files = [f for f in os.listdir(audio_dir) if f.endswith(".mp3")]
+    audio_urls = [f"/audio/{fname}" for fname in audio_files]
+    return render_template("gossip_loop.html", audio_urls=audio_urls)
 
 
 if __name__ == '__main__':
