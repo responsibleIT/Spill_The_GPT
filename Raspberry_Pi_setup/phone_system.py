@@ -38,10 +38,22 @@ RECORDING_FILE = "phone_recording.wav"
 WELCOME_AUDIO = "welcome.mp3"
 TRANSITION_AUDIO = "transition.mp3"
 
+# Audio device configuration
+USB_AUDIO_DEVICE_INDEX = None  # Will be auto-detected or set manually
+FORCE_AUDIO_DEVICE = None      # Set to specific device index if needed
+
+# Try to load audio configuration from config file
+try:
+    from audio_config import *
+    print("Loaded audio configuration from audio_config.py")
+except ImportError:
+    print("No audio_config.py found, using auto-detection")
+
 # Initialize components
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 whisper_model = None  # Will be loaded when needed
-pygame.mixer.init()
+
+# Don't initialize pygame mixer yet - we'll do it with proper device selection
 
 class EnhancedPhoneSystem:
     def __init__(self):
@@ -51,12 +63,100 @@ class EnhancedPhoneSystem:
         self.audio_frames = []
         self.db = GossipDatabase()
         self.horn_button = None
+        self.audio_output_device = None
+        self.audio_input_device = None
+        
+        # Setup audio devices first
+        self.setup_audio_devices()
+        
+        # Initialize pygame mixer with proper device
+        self.init_pygame_audio()
         
         # Initialize GPIO with error handling
         self.setup_gpio()
         
         print("Enhanced phone system initialized. Waiting for phone pickup...")
         print(f"Current gossip count in database: {self.db.get_gossip_count()}")
+    
+    def setup_audio_devices(self):
+        """Detect and configure audio devices, prioritizing USB audio"""
+        print("Setting up audio devices...")
+        
+        try:
+            # Find USB audio devices
+            usb_input_device = None
+            usb_output_device = None
+            
+            print("Available audio devices:")
+            for i in range(self.audio.get_device_count()):
+                info = self.audio.get_device_info_by_index(i)
+                device_name = info['name'].lower()
+                
+                print(f"  Device {i}: {info['name']}")
+                print(f"    Input channels: {info['maxInputChannels']}, Output channels: {info['maxOutputChannels']}")
+                
+                # Look for USB audio devices
+                if any(keyword in device_name for keyword in ['usb', 'card', 'device']):
+                    if info['maxInputChannels'] > 0 and usb_input_device is None:
+                        usb_input_device = i
+                        print(f"    → Found USB input device: {i}")
+                    if info['maxOutputChannels'] > 0 and usb_output_device is None:
+                        usb_output_device = i
+                        print(f"    → Found USB output device: {i}")
+            
+            # Set audio devices (prioritize USB, fall back to default)
+            if FORCE_AUDIO_DEVICE is not None:
+                self.audio_output_device = FORCE_AUDIO_DEVICE
+                self.audio_input_device = FORCE_AUDIO_DEVICE
+                print(f"Using forced audio device: {FORCE_AUDIO_DEVICE}")
+            else:
+                self.audio_output_device = usb_output_device
+                self.audio_input_device = usb_input_device
+                
+                if usb_output_device is not None:
+                    print(f"Using USB audio output device: {usb_output_device}")
+                else:
+                    print("No USB audio output found, using default")
+                    
+                if usb_input_device is not None:
+                    print(f"Using USB audio input device: {usb_input_device}")
+                else:
+                    print("No USB audio input found, using default")
+                    
+        except Exception as e:
+            print(f"Error setting up audio devices: {e}")
+            print("Using default audio devices")
+    
+    def init_pygame_audio(self):
+        """Initialize pygame audio with proper device selection"""
+        try:
+            # Configure SDL audio driver for USB device
+            if self.audio_output_device is not None:
+                # Set environment variables to force specific audio device
+                os.environ['SDL_AUDIODRIVER'] = 'alsa'
+                # Try to set ALSA device (this might need adjustment based on your system)
+                os.environ['ALSA_PCM_DEVICE'] = str(self.audio_output_device)
+                print(f"Configuring pygame for audio device {self.audio_output_device}")
+            
+            # Initialize pygame mixer
+            pygame.mixer.pre_init(
+                frequency=AUDIO_RATE, 
+                size=-16, 
+                channels=AUDIO_CHANNELS, 
+                buffer=1024
+            )
+            pygame.mixer.init()
+            
+            print("Pygame audio initialized successfully")
+            
+        except Exception as e:
+            print(f"Error initializing pygame audio: {e}")
+            # Fall back to default initialization
+            try:
+                pygame.mixer.init()
+                print("Using default pygame audio")
+            except Exception as e2:
+                print(f"Failed to initialize pygame audio: {e2}")
     
     def setup_gpio(self):
         """Setup GPIO with multiple fallback options"""
@@ -223,18 +323,28 @@ class EnhancedPhoneSystem:
             print(f"Error playing transition message: {e}")
     
     def start_recording(self):
-        """Start recording audio from microphone"""
+        """Start recording audio from microphone using configured device"""
         try:
             self.is_recording = True
             self.audio_frames = []
             
-            self.recording_stream = self.audio.open(
-                format=AUDIO_FORMAT,
-                channels=AUDIO_CHANNELS,
-                rate=AUDIO_RATE,
-                input=True,
-                frames_per_buffer=AUDIO_CHUNK
-            )
+            # Configure recording stream with USB device if available
+            stream_kwargs = {
+                'format': AUDIO_FORMAT,
+                'channels': AUDIO_CHANNELS,
+                'rate': AUDIO_RATE,
+                'input': True,
+                'frames_per_buffer': AUDIO_CHUNK
+            }
+            
+            # Use specific input device if configured
+            if self.audio_input_device is not None:
+                stream_kwargs['input_device_index'] = self.audio_input_device
+                print(f"Recording from USB audio device {self.audio_input_device}")
+            else:
+                print("Recording from default audio device")
+            
+            self.recording_stream = self.audio.open(**stream_kwargs)
             
             print("Recording started... Speak your gossip!")
             
@@ -244,7 +354,22 @@ class EnhancedPhoneSystem:
             
         except Exception as e:
             print(f"Error starting recording: {e}")
-            self.is_recording = False
+            print("Trying with default audio device...")
+            # Try with default device as fallback
+            try:
+                self.recording_stream = self.audio.open(
+                    format=AUDIO_FORMAT,
+                    channels=AUDIO_CHANNELS,
+                    rate=AUDIO_RATE,
+                    input=True,
+                    frames_per_buffer=AUDIO_CHUNK
+                )
+                print("Recording started with default device")
+                self.recording_thread = threading.Thread(target=self._record_audio, daemon=True)
+                self.recording_thread.start()
+            except Exception as e2:
+                print(f"Failed to start recording with any device: {e2}")
+                self.is_recording = False
     
     def _record_audio(self):
         """Internal method to continuously record audio"""
