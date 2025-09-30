@@ -31,16 +31,16 @@ except ImportError:
 # Configuration
 HORN_BUTTON_PIN = 4  # GPIO pin for horn detection (adjust as needed)
 AUDIO_FORMAT = pyaudio.paInt16
-AUDIO_CHANNELS = 1
+AUDIO_CHANNELS = 1  # Mono for better USB compatibility
 AUDIO_RATE = 44100
 AUDIO_CHUNK = 1024
+FORCE_AUDIO_DEVICE = None  # Set to specific device index or None for auto-detection
+WELCOME_AUDIO = "welcome_message.mp3"
+TRANSITION_AUDIO = "transition_message.mp3"
 RECORDING_FILE = "phone_recording.wav"
-WELCOME_AUDIO = "welcome.mp3"
-TRANSITION_AUDIO = "transition.mp3"
 
 # Audio device configuration
 USB_AUDIO_DEVICE_INDEX = None  # Will be auto-detected or set manually
-FORCE_AUDIO_DEVICE = None      # Set to specific device index if needed
 
 # Try to load audio configuration from config file
 try:
@@ -94,12 +94,17 @@ class EnhancedPhoneSystem:
                 
                 print(f"  Device {i}: {info['name']}")
                 print(f"    Input channels: {info['maxInputChannels']}, Output channels: {info['maxOutputChannels']}")
+                print(f"    Default sample rate: {info['defaultSampleRate']}")
                 
                 # Look for USB audio devices
                 if any(keyword in device_name for keyword in ['usb', 'card', 'device']):
                     if info['maxInputChannels'] > 0 and usb_input_device is None:
-                        usb_input_device = i
-                        print(f"    → Found USB input device: {i}")
+                        # Check if device supports mono recording
+                        if self.test_device_capabilities(i, input_device=True):
+                            usb_input_device = i
+                            print(f"    → Found compatible USB input device: {i}")
+                        else:
+                            print(f"    → USB device {i} not compatible for recording")
                     if info['maxOutputChannels'] > 0 and usb_output_device is None:
                         usb_output_device = i
                         print(f"    → Found USB output device: {i}")
@@ -126,6 +131,38 @@ class EnhancedPhoneSystem:
         except Exception as e:
             print(f"Error setting up audio devices: {e}")
             print("Using default audio devices")
+    
+    def test_device_capabilities(self, device_index, input_device=True):
+        """Test if a device supports the required audio format"""
+        try:
+            if input_device:
+                # Test if device can record mono audio
+                test_stream = self.audio.open(
+                    format=AUDIO_FORMAT,
+                    channels=1,  # Mono
+                    rate=AUDIO_RATE,
+                    input=True,
+                    input_device_index=device_index,
+                    frames_per_buffer=AUDIO_CHUNK
+                )
+                test_stream.close()
+                return True
+            else:
+                # Test if device can play audio
+                test_stream = self.audio.open(
+                    format=AUDIO_FORMAT,
+                    channels=2,  # Stereo for output
+                    rate=AUDIO_RATE,
+                    output=True,
+                    output_device_index=device_index,
+                    frames_per_buffer=AUDIO_CHUNK
+                )
+                test_stream.close()
+                return True
+                
+        except Exception as e:
+            print(f"    Device {device_index} test failed: {e}")
+            return False
     
     def init_pygame_audio(self):
         """Initialize pygame audio with proper device selection"""
@@ -341,35 +378,63 @@ class EnhancedPhoneSystem:
             if self.audio_input_device is not None:
                 stream_kwargs['input_device_index'] = self.audio_input_device
                 print(f"Recording from USB audio device {self.audio_input_device}")
+                
+                # Get device info to verify capabilities
+                try:
+                    device_info = self.audio.get_device_info_by_index(self.audio_input_device)
+                    max_channels = device_info['maxInputChannels']
+                    print(f"Device supports max {max_channels} input channels")
+                    
+                    # Adjust channels if needed
+                    if AUDIO_CHANNELS > max_channels:
+                        print(f"Reducing channels from {AUDIO_CHANNELS} to {max_channels}")
+                        stream_kwargs['channels'] = max_channels
+                        
+                except Exception as e:
+                    print(f"Error getting device info: {e}")
             else:
                 print("Recording from default audio device")
             
-            self.recording_stream = self.audio.open(**stream_kwargs)
+            # Attempt to open the recording stream
+            try:
+                self.recording_stream = self.audio.open(**stream_kwargs)
+                print("Recording started... Speak your gossip!")
+                
+                # Record in a separate thread
+                self.recording_thread = threading.Thread(target=self._record_audio, daemon=True)
+                self.recording_thread.start()
+                
+            except Exception as stream_error:
+                print(f"Error opening stream with USB device: {stream_error}")
+                # Try with default device as fallback
+                self._try_fallback_recording()
             
-            print("Recording started... Speak your gossip!")
+        except Exception as e:
+            print(f"Error starting recording: {e}")
+            self._try_fallback_recording()
+    
+    def _try_fallback_recording(self):
+        """Try recording with default audio device as fallback"""
+        try:
+            print("Trying with default audio device...")
+            fallback_kwargs = {
+                'format': AUDIO_FORMAT,
+                'channels': 1,  # Force mono for compatibility
+                'rate': AUDIO_RATE,
+                'input': True,
+                'frames_per_buffer': AUDIO_CHUNK
+            }
+            
+            self.recording_stream = self.audio.open(**fallback_kwargs)
+            print("Fallback recording started!")
             
             # Record in a separate thread
             self.recording_thread = threading.Thread(target=self._record_audio, daemon=True)
             self.recording_thread.start()
             
-        except Exception as e:
-            print(f"Error starting recording: {e}")
-            print("Trying with default audio device...")
-            # Try with default device as fallback
-            try:
-                self.recording_stream = self.audio.open(
-                    format=AUDIO_FORMAT,
-                    channels=AUDIO_CHANNELS,
-                    rate=AUDIO_RATE,
-                    input=True,
-                    frames_per_buffer=AUDIO_CHUNK
-                )
-                print("Recording started with default device")
-                self.recording_thread = threading.Thread(target=self._record_audio, daemon=True)
-                self.recording_thread.start()
-            except Exception as e2:
-                print(f"Failed to start recording with any device: {e2}")
-                self.is_recording = False
+        except Exception as fallback_error:
+            print(f"Fallback recording also failed: {fallback_error}")
+            self.is_recording = False
     
     def _record_audio(self):
         """Internal method to continuously record audio"""
@@ -450,14 +515,35 @@ class EnhancedPhoneSystem:
             print(f"Error processing new gossip: {e}")
     
     def transcribe_audio(self, audio_file_path):
-        """Transcribe audio using Whisper"""
+        """Transcribe audio using Whisper with error handling"""
         global whisper_model
-        if whisper_model is None:
-            print("Loading Whisper model...")
-            whisper_model = whisper.load_model("tiny")
-        
-        result = whisper_model.transcribe(audio_file_path)
-        return result["text"]
+        try:
+            if whisper_model is None:
+                print("Loading Whisper model...")
+                try:
+                    whisper_model = whisper.load_model("tiny")
+                except Exception as e:
+                    print(f"Error loading tiny model: {e}")
+                    try:
+                        print("Trying base model...")
+                        whisper_model = whisper.load_model("base")
+                    except Exception as e2:
+                        print(f"Error loading base model: {e2}")
+                        return None
+            
+            print(f"Transcribing audio file: {audio_file_path}")
+            result = whisper_model.transcribe(audio_file_path, language="nl")
+            transcription = result["text"].strip()
+            print(f"Transcription: {transcription}")
+            return transcription
+            
+        except Exception as e:
+            print(f"Error transcribing audio: {e}")
+            # Reset whisper model if it failed
+            whisper_model = None
+            import gc
+            gc.collect()
+            return None
     
     def clean_text(self, text):
         """Process text with GPT to create anonymized gossip"""
