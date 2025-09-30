@@ -10,12 +10,23 @@ import threading
 import pyaudio
 import wave
 import pygame
-from gpiozero import Button
 from signal import pause
 import whisper
 from openai import OpenAI
 from el import text_to_speech_file
 from gossip_database import GossipDatabase
+
+# Try different GPIO libraries
+try:
+    from gpiozero import Button
+    GPIO_LIBRARY = "gpiozero"
+except ImportError:
+    try:
+        import RPi.GPIO as GPIO
+        GPIO_LIBRARY = "RPi.GPIO"
+    except ImportError:
+        GPIO_LIBRARY = None
+        print("Warning: No GPIO library available. Running in simulation mode.")
 
 # Configuration
 HORN_BUTTON_PIN = 4  # GPIO pin for horn detection (adjust as needed)
@@ -34,19 +45,97 @@ pygame.mixer.init()
 
 class EnhancedPhoneSystem:
     def __init__(self):
-        self.horn_button = Button(HORN_BUTTON_PIN, pull_up=True)
         self.is_recording = False
         self.audio = pyaudio.PyAudio()
         self.recording_stream = None
         self.audio_frames = []
         self.db = GossipDatabase()
+        self.horn_button = None
         
-        # Set up event handlers
-        self.horn_button.when_pressed = self.on_horn_pickup
-        self.horn_button.when_released = self.on_horn_putdown
+        # Initialize GPIO with error handling
+        self.setup_gpio()
         
         print("Enhanced phone system initialized. Waiting for phone pickup...")
         print(f"Current gossip count in database: {self.db.get_gossip_count()}")
+    
+    def setup_gpio(self):
+        """Setup GPIO with multiple fallback options"""
+        try:
+            if GPIO_LIBRARY == "gpiozero":
+                print("Using gpiozero GPIO library...")
+                # Try with different pin factory options
+                try:
+                    from gpiozero.pins.mock import MockFactory
+                    from gpiozero import Device
+                    
+                    # First try the default
+                    self.horn_button = Button(HORN_BUTTON_PIN, pull_up=True, bounce_time=0.1)
+                    self.horn_button.when_pressed = self.on_horn_pickup
+                    self.horn_button.when_released = self.on_horn_putdown
+                    print(f"GPIO setup successful on pin {HORN_BUTTON_PIN}")
+                    
+                except Exception as e:
+                    print(f"gpiozero setup failed: {e}")
+                    # Try with mock factory for testing
+                    try:
+                        Device.pin_factory = MockFactory()
+                        self.horn_button = Button(HORN_BUTTON_PIN, pull_up=True)
+                        self.horn_button.when_pressed = self.on_horn_pickup
+                        self.horn_button.when_released = self.on_horn_putdown
+                        print("Using mock GPIO for testing")
+                    except Exception as e2:
+                        print(f"Mock GPIO also failed: {e2}")
+                        self.setup_keyboard_fallback()
+                        
+            elif GPIO_LIBRARY == "RPi.GPIO":
+                print("Using RPi.GPIO library...")
+                GPIO.setmode(GPIO.BCM)
+                GPIO.setup(HORN_BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+                GPIO.add_event_detect(HORN_BUTTON_PIN, GPIO.BOTH, 
+                                    callback=self.gpio_callback, bouncetime=100)
+                print(f"RPi.GPIO setup successful on pin {HORN_BUTTON_PIN}")
+                
+            else:
+                print("No GPIO library available - using keyboard fallback")
+                self.setup_keyboard_fallback()
+                
+        except Exception as e:
+            print(f"GPIO setup failed: {e}")
+            self.setup_keyboard_fallback()
+    
+    def setup_keyboard_fallback(self):
+        """Setup keyboard input as fallback when GPIO fails"""
+        print("Setting up keyboard fallback...")
+        print("Press 'p' to simulate phone pickup, 'h' to hang up, 'q' to quit")
+        
+        def keyboard_handler():
+            try:
+                while True:
+                    key = input("Command (p=pickup, h=hangup, q=quit): ").lower().strip()
+                    if key == 'p':
+                        print("Simulating phone pickup...")
+                        self.on_horn_pickup()
+                    elif key == 'h':
+                        print("Simulating phone hangup...")
+                        self.on_horn_putdown()
+                    elif key == 'q':
+                        print("Quitting...")
+                        break
+                    else:
+                        print("Unknown command. Use p/h/q")
+            except KeyboardInterrupt:
+                pass
+        
+        # Start keyboard handler in separate thread
+        keyboard_thread = threading.Thread(target=keyboard_handler, daemon=True)
+        keyboard_thread.start()
+    
+    def gpio_callback(self, channel):
+        """Callback for RPi.GPIO events"""
+        if GPIO.input(channel) == GPIO.LOW:
+            self.on_horn_pickup()
+        else:
+            self.on_horn_putdown()
     
     def on_horn_pickup(self):
         """Called when the phone horn is picked up"""
@@ -278,6 +367,14 @@ class EnhancedPhoneSystem:
             self.stop_recording()
         self.audio.terminate()
         pygame.mixer.quit()
+        
+        # Clean up GPIO
+        if GPIO_LIBRARY == "RPi.GPIO":
+            try:
+                GPIO.cleanup()
+            except:
+                pass
+        
         # Clean up any missing files in database
         self.db.cleanup_missing_files()
 
@@ -285,11 +382,23 @@ def main():
     """Main function to run the enhanced phone system"""
     try:
         phone = EnhancedPhoneSystem()
-        print("Enhanced phone system ready. Pick up the phone to start!")
+        print("Enhanced phone system ready!")
         print("Flow: Welcome → Previous Gossip → Transition → Record → Process → Save")
         
-        # Keep the program running
-        pause()
+        if GPIO_LIBRARY == "gpiozero" and phone.horn_button:
+            print("Using GPIO - Pick up the phone to start!")
+            # Keep the program running
+            pause()
+        elif GPIO_LIBRARY == "RPi.GPIO":
+            print("Using RPi.GPIO - Pick up the phone to start!")
+            # Keep the program running
+            while True:
+                time.sleep(1)
+        else:
+            print("Using keyboard fallback mode")
+            # Keep the program running for keyboard input
+            while True:
+                time.sleep(1)
         
     except KeyboardInterrupt:
         print("\nShutting down enhanced phone system...")

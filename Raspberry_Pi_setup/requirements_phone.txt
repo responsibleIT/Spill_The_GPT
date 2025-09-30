@@ -11,6 +11,8 @@ gpiozero        # GPIO handling for button detection
 pyaudio         # Direct audio recording from microphone
 pygame          # Audio playback
 RPi.GPIO        # Alternative GPIO library (backup)
+lgpio           # Low-level GPIO library for gpiozero
+rpi-lgpio       # Alternative lgpio implementation
 
 # Database and file handling (built-in Python modules)
 # sqlite3 - built-in
