@@ -88,21 +88,64 @@ def configure_usb_audio():
         print("Could not detect audio cards")
         return
     
-    # Parse card numbers and names
+    # Parse card numbers and names - improved detection
     cards = []
     for line in cards_output.split('\n'):
-        if 'USB' in line.upper() or 'CARD' in line.upper():
-            try:
-                card_num = int(line.split(':')[0].strip())
-                card_name = line.split(':')[1].strip() if ':' in line else "Unknown"
-                cards.append((card_num, card_name))
-                print(f"Found potential USB card: {card_num} - {card_name}")
-            except (ValueError, IndexError):
-                continue
+        line = line.strip()
+        if not line or 'card' not in line.lower():
+            continue
+            
+        try:
+            # Extract card number and details
+            if '[' in line and ']' in line:
+                card_part = line.split('[')[0].strip()
+                card_num = int(card_part)
+                
+                # Get card name and driver info
+                name_part = line.split('[')[1].split(']')[0]
+                driver_part = line.split(']:')[1].strip() if ']:' in line else ""
+                
+                # Check if this looks like a USB audio device
+                is_usb = any(keyword in line.upper() for keyword in [
+                    'USB-AUDIO', 'USB AUDIO', 'KT USB', 'AUDIO', 
+                    'MICROPHONE', 'HEADSET', 'WEBCAM'
+                ])
+                
+                # Exclude built-in Pi audio
+                is_builtin = any(keyword in line.upper() for keyword in [
+                    'BCM2835', 'VC4-HDMI', 'HEADPHONES'
+                ])
+                
+                if is_usb and not is_builtin:
+                    cards.append((card_num, f"{name_part} - {driver_part}"))
+                    print(f"Found USB audio device: {card_num} - {name_part}")
+                elif not is_builtin:
+                    # Include any non-builtin audio device as potential USB
+                    cards.append((card_num, f"{name_part} - {driver_part}"))
+                    print(f"Found external audio device: {card_num} - {name_part}")
+                    
+        except (ValueError, IndexError) as e:
+            continue
     
     if not cards:
-        print("No USB audio cards detected")
-        print("Make sure your USB audio device is connected")
+        print("No external audio devices detected")
+        print("Available cards:")
+        print(cards_output)
+        print("\nTrying manual detection...")
+        
+        # Manual fallback - show all non-builtin cards
+        for line in cards_output.split('\n'):
+            if 'bcm2835' not in line.lower() and 'vc4-hdmi' not in line.lower() and '[' in line:
+                try:
+                    card_num = int(line.split('[')[0].strip())
+                    name = line.split('[')[1].split(']')[0]
+                    cards.append((card_num, name))
+                    print(f"Manual detection found: {card_num} - {name}")
+                except:
+                    continue
+    
+    if not cards:
+        print("No suitable audio cards found")
         return
     
     # Let user select card
