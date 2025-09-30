@@ -1,0 +1,22 @@
+# Requirements for Enhanced Phone-based Gossip System
+
+# Original requirements
+openai
+openai-whisper
+python-dotenv
+elevenlabs
+
+# New requirements for Raspberry Pi phone system
+gpiozero        # GPIO handling for button detection
+pyaudio         # Direct audio recording from microphone
+pygame          # Audio playback
+RPi.GPIO        # Alternative GPIO library (backup)
+
+# Database and file handling (built-in Python modules)
+# sqlite3 - built-in
+# wave - built-in
+# threading - built-in
+# uuid - built-in
+
+# Optional but recommended
+numpy           # Audio processing support
