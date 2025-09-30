@@ -35,8 +35,8 @@ AUDIO_CHANNELS = 1  # Mono for better USB compatibility
 AUDIO_RATE = 44100
 AUDIO_CHUNK = 1024
 FORCE_AUDIO_DEVICE = None  # Set to specific device index or None for auto-detection
-WELCOME_AUDIO = "welcome_message.mp3"
-TRANSITION_AUDIO = "transition_message.mp3"
+WELCOME_AUDIO = "welcome.mp3"
+TRANSITION_AUDIO = "transition.mp3"
 RECORDING_FILE = "phone_recording.wav"
 
 # Audio device configuration
