@@ -515,11 +515,53 @@ class EnhancedPhoneSystem:
             print(f"Error processing new gossip: {e}")
     
     def transcribe_audio(self, audio_file_path):
-        """Transcribe audio using Whisper with error handling"""
+        """Transcribe audio using OpenAI Whisper API"""
+        try:
+            print(f"Transcribing audio file using OpenAI API: {audio_file_path}")
+            
+            # Check if file exists and has content
+            import os
+            if not os.path.exists(audio_file_path):
+                print(f"Audio file not found: {audio_file_path}")
+                return None
+            
+            file_size = os.path.getsize(audio_file_path)
+            if file_size == 0:
+                print("Audio file is empty")
+                return None
+            
+            print(f"Audio file size: {file_size} bytes")
+            
+            # Use OpenAI client to transcribe audio
+            with open(audio_file_path, 'rb') as audio_file:
+                response = openai_client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="nl"  # Dutch
+                )
+            
+            transcription = response.text.strip()
+            print(f"API Transcription: {transcription}")
+            
+            if not transcription:
+                print("No speech detected in recording")
+                return None
+            
+            return transcription
+            
+        except Exception as e:
+            print(f"Error transcribing audio with API: {e}")
+            print("Falling back to local Whisper model...")
+            
+            # Fallback to local Whisper if API fails
+            return self._transcribe_local_whisper(audio_file_path)
+    
+    def _transcribe_local_whisper(self, audio_file_path):
+        """Fallback method using local Whisper model"""
         global whisper_model
         try:
             if whisper_model is None:
-                print("Loading Whisper model...")
+                print("Loading local Whisper model...")
                 try:
                     whisper_model = whisper.load_model("tiny")
                 except Exception as e:
@@ -531,14 +573,14 @@ class EnhancedPhoneSystem:
                         print(f"Error loading base model: {e2}")
                         return None
             
-            print(f"Transcribing audio file: {audio_file_path}")
+            print(f"Transcribing with local model: {audio_file_path}")
             result = whisper_model.transcribe(audio_file_path, language="nl")
             transcription = result["text"].strip()
-            print(f"Transcription: {transcription}")
+            print(f"Local Transcription: {transcription}")
             return transcription
             
         except Exception as e:
-            print(f"Error transcribing audio: {e}")
+            print(f"Error with local transcription: {e}")
             # Reset whisper model if it failed
             whisper_model = None
             import gc
