@@ -30,8 +30,8 @@ Type=simple
 User=$CURRENT_USER
 Group=$CURRENT_USER
 WorkingDirectory=$SCRIPT_DIR
-Environment=PATH=$SCRIPT_DIR/phone_env/bin
-ExecStart=$SCRIPT_DIR/phone_env/bin/python $SCRIPT_DIR/phone_system.py
+Environment=PATH=$SCRIPT_DIR/env/bin
+ExecStart=$SCRIPT_DIR/env/bin/python $SCRIPT_DIR/phone_system.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -66,8 +66,8 @@ echo "Waiting for audio system..."
 sleep 5
 
 # Check if virtual environment exists
-if [ ! -d "phone_env" ]; then
-    echo "❌ Virtual environment not found at phone_env"
+if [ ! -d "env" ]; then
+    echo "❌ Virtual environment not found at env"
     exit 1
 fi
 
@@ -86,7 +86,7 @@ fi
 # Check if audio files exist
 if [ ! -f "welcome.mp3" ] || [ ! -f "transition.mp3" ]; then
     echo "🎵 Generating missing audio files..."
-    source phone_env/bin/activate
+    source env/bin/activate
     python create_welcome.py
     if [ $? -ne 0 ]; then
         echo "❌ Failed to generate audio files"
@@ -96,7 +96,7 @@ fi
 
 # Activate virtual environment and run
 echo "🚀 Starting phone system..."
-source phone_env/bin/activate
+source env/bin/activate
 python phone_system.py
 EOF
 
