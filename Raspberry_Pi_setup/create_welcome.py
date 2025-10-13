@@ -12,10 +12,11 @@ def create_welcome_message():
     
     # Welcome message text (adjust language as needed)
     welcome_text = """
-    Welkom. Heb jij iets gehoord? Over je buurvrouw? Mischien over iemand op werk of over op school? Ik heb heel veel gehoord.
+    Welkom, heb jij iets gehoord? Over je buurvrouw? Mischien over iemand op werk of op school? Ik heb heel veel gehoord.
     Ik deel graag wat ik weet, maar ik wil ook graag jouw verhaal horen.
     Als ik jou iets vertel, vertel jij mij dan iets terug? Dat is wel zo eerlijk.
     Als je iets wil delen, blijf dan aan de lijn.
+    Ik ga wel eerst.
     """
     
     # Alternative English version:
@@ -49,7 +50,7 @@ def create_transition_message():
     
     # Transition message text
     transition_text = """
-    Nu is het uw beurt. Vertel mij uw roddels
+    Nu is het uw beurt, vertel mij uw roddels.
     Als je klaar bent leg dan de telefoon terug op de haak.
     """
     

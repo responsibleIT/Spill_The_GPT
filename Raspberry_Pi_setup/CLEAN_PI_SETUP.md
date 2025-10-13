@@ -28,8 +28,8 @@ sudo apt install -y portaudio19-dev python3-pyaudio alsa-utils pulseaudio
 ### 4. Python Environment
 ```bash
 # Create virtual environment
-python3 -m venv phone_env
-source phone_env/bin/activate
+python3 -m venv env
+source env/bin/activate
 
 # Install requirements
 pip install -r requirements_phone.txt
@@ -132,8 +132,8 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/phone_system
-Environment=PATH=/home/pi/phone_system/phone_env/bin
-ExecStart=/home/pi/phone_system/phone_env/bin/python /home/pi/phone_system/phone_system.py
+Environment=PATH=/home/pi/phone_system/env/bin
+ExecStart=/home/pi/phone_system/env/bin/python /home/pi/phone_system/phone_system.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -217,7 +217,7 @@ Flow: Welcome → Previous Gossip → Transition → Record → Process → Save
 ### Issue 1: "No module named 'gpiozero'"
 **Solution:** Make sure you're in your virtual environment:
 ```bash
-source phone_env/bin/activate
+source env/bin/activate
 pip install gpiozero
 ```
 
