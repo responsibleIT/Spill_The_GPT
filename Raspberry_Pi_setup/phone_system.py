@@ -60,6 +60,7 @@ class EnhancedPhoneSystem:
         self.is_recording = False
         self.is_interrupted = False  # Flag to interrupt audio playback
         self.phone_state = "idle"  # Track phone state: "idle", "active", "recording", "processing"
+        self.call_thread = None  # Track the current call thread
         self.audio = pyaudio.PyAudio()
         self.recording_stream = None
         self.audio_frames = []
@@ -285,6 +286,51 @@ class EnhancedPhoneSystem:
         else:
             print("Phone not active, ignoring putdown")
     
+    def interruptible_sleep(self, duration):
+        """Sleep that can be interrupted by setting is_interrupted flag"""
+        sleep_time = 0.0
+        while sleep_time < duration and not self.is_interrupted:
+            time.sleep(0.1)
+            sleep_time += 0.1
+        return not self.is_interrupted  # Return True if completed, False if interrupted
+    
+    def run_call_sequence(self):
+        """Run the complete call sequence in a separate thread"""
+        try:
+            # New flow: welcome → previous gossip → transition → record
+            self.play_welcome_message()
+            if self.is_interrupted:
+                return
+                
+            if not self.interruptible_sleep(0.5):  # Brief pause
+                return
+            
+            self.play_previous_gossip()
+            if self.is_interrupted:
+                return
+                
+            if not self.interruptible_sleep(0.5):  # Brief pause
+                return
+            
+            self.play_transition_message()
+            if self.is_interrupted:
+                return
+                
+            if not self.interruptible_sleep(1.0):  # Pause before recording
+                return
+            
+            if not self.is_interrupted:
+                self.phone_state = "recording"
+                self.start_recording()
+                
+        except Exception as e:
+            print(f"Error in call sequence: {e}")
+        finally:
+            # If we get here and not recording, reset state
+            if self.phone_state == "active":
+                self.phone_state = "idle"
+                print("Call sequence ended, returning to idle")
+    
     def gpio_callback(self, channel):
         """Callback for RPi.GPIO events"""
         button_state = GPIO.input(channel)
@@ -313,31 +359,9 @@ class EnhancedPhoneSystem:
         # Reset interruption flag for new call
         self.is_interrupted = False
         
-        # New flow: welcome → previous gossip → transition → record
-        self.play_welcome_message()
-        if self.is_interrupted:
-            self.phone_state = "idle"
-            return
-            
-        time.sleep(0.5)  # Brief pause
-        
-        self.play_previous_gossip()
-        if self.is_interrupted:
-            self.phone_state = "idle"
-            return
-            
-        time.sleep(0.5)  # Brief pause
-        
-        self.play_transition_message()
-        if self.is_interrupted:
-            self.phone_state = "idle"
-            return
-            
-        time.sleep(1)  # Pause before recording
-        
-        if not self.is_interrupted:
-            self.phone_state = "recording"
-            self.start_recording()
+        # Start the call sequence in a separate thread so it can be interrupted
+        self.call_thread = threading.Thread(target=self.run_call_sequence, daemon=True)
+        self.call_thread.start()
     
     def on_horn_putdown(self):
         """Called when the phone horn is put down"""
@@ -362,6 +386,18 @@ class EnhancedPhoneSystem:
             # No recording, just go back to idle
             self.phone_state = "idle"
             print("Call ended, returning to idle state")
+            
+        # Wait a moment for the call thread to finish, then reset
+        if self.call_thread and self.call_thread.is_alive():
+            print("Waiting for call thread to finish...")
+            # Give it a moment to respond to interruption
+            threading.Timer(0.5, self._reset_if_needed).start()
+    
+    def _reset_if_needed(self):
+        """Helper method to reset state if call thread doesn't respond to interruption"""
+        if self.phone_state == "active" and self.is_interrupted:
+            print("Force resetting to idle state")
+            self.phone_state = "idle"
     
     def play_welcome_message(self):
         """Play the welcome audio message"""
