@@ -59,6 +59,7 @@ class EnhancedPhoneSystem:
     def __init__(self):
         self.is_recording = False
         self.is_interrupted = False  # Flag to interrupt audio playback
+        self.phone_state = "idle"  # Track phone state: "idle", "active", "recording", "processing"
         self.audio = pyaudio.PyAudio()
         self.recording_stream = None
         self.audio_frames = []
@@ -208,8 +209,8 @@ class EnhancedPhoneSystem:
                     
                     # First try the default
                     self.horn_button = Button(HORN_BUTTON_PIN, pull_up=True, bounce_time=0.1)
-                    self.horn_button.when_pressed = self.on_horn_pickup
-                    self.horn_button.when_released = self.on_horn_putdown
+                    self.horn_button.when_pressed = self.gpiozero_pickup_callback
+                    self.horn_button.when_released = self.gpiozero_putdown_callback
                     print(f"GPIO setup successful on pin {HORN_BUTTON_PIN}")
                     
                 except Exception as e:
@@ -218,8 +219,8 @@ class EnhancedPhoneSystem:
                     try:
                         Device.pin_factory = MockFactory()
                         self.horn_button = Button(HORN_BUTTON_PIN, pull_up=True)
-                        self.horn_button.when_pressed = self.on_horn_pickup
-                        self.horn_button.when_released = self.on_horn_putdown
+                        self.horn_button.when_pressed = self.gpiozero_pickup_callback
+                        self.horn_button.when_released = self.gpiozero_putdown_callback
                         print("Using mock GPIO for testing")
                     except Exception as e2:
                         print(f"Mock GPIO also failed: {e2}")
@@ -268,16 +269,46 @@ class EnhancedPhoneSystem:
         keyboard_thread = threading.Thread(target=keyboard_handler, daemon=True)
         keyboard_thread.start()
     
-    def gpio_callback(self, channel):
-        """Callback for RPi.GPIO events"""
-        if GPIO.input(channel) == GPIO.LOW:
+    def gpiozero_pickup_callback(self):
+        """Wrapper for gpiozero button pressed callback"""
+        print(f"Button pressed (gpiozero) - Current state: {self.phone_state}")
+        if self.phone_state == "idle":
             self.on_horn_pickup()
         else:
+            print("Phone already active, ignoring pickup")
+    
+    def gpiozero_putdown_callback(self):
+        """Wrapper for gpiozero button released callback"""
+        print(f"Button released (gpiozero) - Current state: {self.phone_state}")
+        if self.phone_state in ["active", "recording"]:
             self.on_horn_putdown()
+        else:
+            print("Phone not active, ignoring putdown")
+    
+    def gpio_callback(self, channel):
+        """Callback for RPi.GPIO events"""
+        button_state = GPIO.input(channel)
+        
+        if button_state == GPIO.LOW:  # Button pressed (phone picked up)
+            print(f"Button pressed - Current state: {self.phone_state}")
+            if self.phone_state == "idle":
+                self.on_horn_pickup()
+            else:
+                print("Phone already active, ignoring pickup")
+                
+        else:  # Button released (phone put down)
+            print(f"Button released - Current state: {self.phone_state}")
+            if self.phone_state in ["active", "recording"]:
+                self.on_horn_putdown()
+            else:
+                print("Phone not active, ignoring putdown")
     
     def on_horn_pickup(self):
         """Called when the phone horn is picked up"""
         print("Phone picked up! Starting enhanced interaction...")
+        
+        # Set phone state to active
+        self.phone_state = "active"
         
         # Reset interruption flag for new call
         self.is_interrupted = False
@@ -285,23 +316,27 @@ class EnhancedPhoneSystem:
         # New flow: welcome → previous gossip → transition → record
         self.play_welcome_message()
         if self.is_interrupted:
+            self.phone_state = "idle"
             return
             
         time.sleep(0.5)  # Brief pause
         
         self.play_previous_gossip()
         if self.is_interrupted:
+            self.phone_state = "idle"
             return
             
         time.sleep(0.5)  # Brief pause
         
         self.play_transition_message()
         if self.is_interrupted:
+            self.phone_state = "idle"
             return
             
         time.sleep(1)  # Pause before recording
         
         if not self.is_interrupted:
+            self.phone_state = "recording"
             self.start_recording()
     
     def on_horn_putdown(self):
@@ -319,9 +354,14 @@ class EnhancedPhoneSystem:
             print(f"Error stopping audio: {e}")
         
         if self.is_recording:
+            self.phone_state = "processing"
             self.stop_recording()
             # Process the recording in a separate thread to avoid blocking
             threading.Thread(target=self.process_new_gossip, daemon=True).start()
+        else:
+            # No recording, just go back to idle
+            self.phone_state = "idle"
+            print("Call ended, returning to idle state")
     
     def play_welcome_message(self):
         """Play the welcome audio message"""
@@ -545,6 +585,10 @@ class EnhancedPhoneSystem:
             
         except Exception as e:
             print(f"Error processing new gossip: {e}")
+        finally:
+            # Always reset to idle state when processing is complete
+            self.phone_state = "idle"
+            print("Phone system ready for next call")
     
     def transcribe_audio(self, audio_file_path):
         """Transcribe audio using OpenAI Whisper API"""
