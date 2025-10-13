@@ -58,6 +58,7 @@ whisper_model = None  # Will be loaded when needed
 class EnhancedPhoneSystem:
     def __init__(self):
         self.is_recording = False
+        self.is_interrupted = False  # Flag to interrupt audio playback
         self.audio = pyaudio.PyAudio()
         self.recording_stream = None
         self.audio_frames = []
@@ -278,21 +279,44 @@ class EnhancedPhoneSystem:
         """Called when the phone horn is picked up"""
         print("Phone picked up! Starting enhanced interaction...")
         
+        # Reset interruption flag for new call
+        self.is_interrupted = False
+        
         # New flow: welcome → previous gossip → transition → record
         self.play_welcome_message()
+        if self.is_interrupted:
+            return
+            
         time.sleep(0.5)  # Brief pause
         
         self.play_previous_gossip()
+        if self.is_interrupted:
+            return
+            
         time.sleep(0.5)  # Brief pause
         
         self.play_transition_message()
+        if self.is_interrupted:
+            return
+            
         time.sleep(1)  # Pause before recording
         
-        self.start_recording()
+        if not self.is_interrupted:
+            self.start_recording()
     
     def on_horn_putdown(self):
         """Called when the phone horn is put down"""
-        print("Phone hung up! Processing recording...")
+        print("Phone hung up! Interrupting any audio and processing recording...")
+        
+        # Set interruption flag to stop any ongoing audio
+        self.is_interrupted = True
+        
+        # Stop any audio playback immediately
+        try:
+            pygame.mixer.music.stop()
+            print("Audio playback interrupted")
+        except Exception as e:
+            print(f"Error stopping audio: {e}")
         
         if self.is_recording:
             self.stop_recording()
@@ -307,9 +331,13 @@ class EnhancedPhoneSystem:
                 pygame.mixer.music.load(WELCOME_AUDIO)
                 pygame.mixer.music.play()
                 
-                # Wait for playback to finish
-                while pygame.mixer.music.get_busy():
+                # Wait for playback to finish, but check for interruption
+                while pygame.mixer.music.get_busy() and not self.is_interrupted:
                     time.sleep(0.1)
+                    
+                if self.is_interrupted:
+                    pygame.mixer.music.stop()
+                    print("Welcome message interrupted")
             else:
                 print("Welcome audio file not found!")
         except Exception as e:
@@ -326,9 +354,13 @@ class EnhancedPhoneSystem:
                 pygame.mixer.music.load(previous_gossip['file_path'])
                 pygame.mixer.music.play()
                 
-                # Wait for playback to finish
-                while pygame.mixer.music.get_busy():
+                # Wait for playback to finish, but check for interruption
+                while pygame.mixer.music.get_busy() and not self.is_interrupted:
                     time.sleep(0.1)
+                    
+                if self.is_interrupted:
+                    pygame.mixer.music.stop()
+                    print("Previous gossip interrupted")
             else:
                 print("No previous gossip available or file not found")
                 # Optional: play a message saying this is the first gossip
@@ -351,9 +383,13 @@ class EnhancedPhoneSystem:
                 pygame.mixer.music.load(TRANSITION_AUDIO)
                 pygame.mixer.music.play()
                 
-                # Wait for playback to finish
-                while pygame.mixer.music.get_busy():
+                # Wait for playback to finish, but check for interruption
+                while pygame.mixer.music.get_busy() and not self.is_interrupted:
                     time.sleep(0.1)
+                    
+                if self.is_interrupted:
+                    pygame.mixer.music.stop()
+                    print("Transition message interrupted")
             else:
                 print("Transition audio file not found!")
         except Exception as e:
@@ -504,10 +540,6 @@ class EnhancedPhoneSystem:
             if gossip_id > 0:
                 print(f"Gossip saved to database with ID: {gossip_id}")
                 print(f"Total gossip count: {self.db.get_gossip_count()}")
-            
-            # Step 5: Play the result (optional - you might want to skip this)
-            print("Playing processed gossip...")
-            self.play_audio_file(audio_path)
             
             print("New gossip processing complete!")
             
