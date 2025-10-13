@@ -68,6 +68,7 @@ class EnhancedPhoneSystem:
         self.horn_button = None
         self.audio_output_device = None
         self.audio_input_device = None
+        self.audio_controller = None  # Audio level controller
         
         # Setup audio devices first
         self.setup_audio_devices()
@@ -77,6 +78,9 @@ class EnhancedPhoneSystem:
         
         # Initialize GPIO with error handling
         self.setup_gpio()
+        
+        # Initialize audio level controller
+        self.setup_audio_level_control()
         
         print("Enhanced phone system initialized. Waiting for phone pickup...")
         print(f"Current gossip count in database: {self.db.get_gossip_count()}")
@@ -134,6 +138,30 @@ class EnhancedPhoneSystem:
         except Exception as e:
             print(f"Error setting up audio devices: {e}")
             print("Using default audio devices")
+    
+    def setup_audio_level_control(self):
+        """Initialize and start audio level monitoring"""
+        try:
+            from audio_level_controller import AudioLevelController
+            
+            # Create audio controller with target volume of 85%
+            self.audio_controller = AudioLevelController(
+                target_volume=85,      # Set desired volume level
+                check_interval=60      # Check every 60 seconds
+            )
+            
+            # Set initial audio levels
+            print("Setting up audio level control...")
+            self.audio_controller.set_initial_levels()
+            
+            # Start background monitoring
+            self.audio_controller.start_monitoring()
+            print("Audio level monitoring started")
+            
+        except Exception as e:
+            print(f"Audio level control setup failed: {e}")
+            print("Continuing without audio level monitoring...")
+            self.audio_controller = None
     
     def test_device_capabilities(self, device_index, input_device=True):
         """Test if a device supports the required audio format"""
